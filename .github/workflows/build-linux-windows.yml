@@ -145,12 +145,16 @@ jobs:
           test -s "$SDL_LIB/libSDL3.dll.a"
           test -s "$SDL_LIB/libSDL3_image.dll.a"
 
-          # PNG support is an optional vcpkg feature of sdl3-image. Its
-          # runtime dependencies must be present in the packaged DLL set.
-          find "$SDL_BIN" -maxdepth 1 -type f -iname '*png*.dll' -print -quit | grep -q .
-          find "$SDL_BIN" -maxdepth 1 -type f \
-            \( -iname 'zlib*.dll' -o -iname 'zlib1.dll' \) \
-            -print -quit | grep -q .
+          # vcpkg builds SDL3_image with codec dependencies linked
+          # statically into SDL3_image.dll (SDLIMAGE_DEPS_SHARED=OFF).
+          # Separate libpng/zlib DLL files are therefore not expected.
+          # The install step already fails if the requested [png] feature
+          # cannot be built, so only the actual SDL runtime files are
+          # mandatory here.
+          echo "Installed SDL3_image package:"
+          "$VCPKG_ROOT/vcpkg" list \
+            --x-install-root="$VCPKG_INSTALLED_DIR" \
+            | grep -E '^sdl3-image' || true
 
           file "$SDL_BIN/SDL3.dll"
           file "$SDL_BIN/SDL3_image.dll"
