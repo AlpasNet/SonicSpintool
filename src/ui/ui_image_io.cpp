@@ -4,6 +4,8 @@
 #include "SDL3/SDL_iostream.h"
 #include "SDL3/SDL_image.h"
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <fstream>
 #include <iterator>
@@ -70,6 +72,20 @@ namespace spintool
 			return {};
 		}
 
+		constexpr std::array<Uint8, 8> png_signature{
+			0x89U, 0x50U, 0x4EU, 0x47U, 0x0DU, 0x0AU, 0x1AU, 0x0AU
+		};
+		if (file_bytes.size() < png_signature.size() ||
+			!std::equal(
+				png_signature.begin(),
+				png_signature.end(),
+				file_bytes.begin()
+			))
+		{
+			set_error("The selected file is not a valid PNG file.");
+			return {};
+		}
+
 		SDL_IOStream* stream = SDL_IOFromConstMem(
 			file_bytes.data(),
 			file_bytes.size()
@@ -80,10 +96,18 @@ namespace spintool
 			return {};
 		}
 
-		SDLSurfaceHandle surface{IMG_Load_IO(stream, true)};
+		// The Windows package uses SDL3_image built by vcpkg. Pass the explicit
+		// type so SDL_image does not have to infer it from an in-memory stream.
+		SDL_ClearError();
+		SDLSurfaceHandle surface{IMG_LoadTyped_IO(stream, true, "PNG")};
 		if (!surface)
 		{
-			set_error(std::string("SDL_image could not decode the image: ") + SDL_GetError());
+			set_error(
+				std::string("SDL_image could not decode the PNG: ") +
+				SDL_GetError() +
+				". On Windows, make sure the package was built with "
+				"the SDL3_image PNG feature and includes its dependency DLLs."
+			);
 			return {};
 		}
 

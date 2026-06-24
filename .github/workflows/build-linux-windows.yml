@@ -122,7 +122,7 @@ jobs:
         run: |
           "$VCPKG_ROOT/vcpkg" install \
             sdl3:x64-mingw-dynamic \
-            sdl3-image:x64-mingw-dynamic \
+            "sdl3-image[png]:x64-mingw-dynamic" \
             --x-install-root="$VCPKG_INSTALLED_DIR" \
             --clean-after-build
 
@@ -144,6 +144,13 @@ jobs:
           test -s "$SDL_BIN/SDL3_image.dll"
           test -s "$SDL_LIB/libSDL3.dll.a"
           test -s "$SDL_LIB/libSDL3_image.dll.a"
+
+          # PNG support is an optional vcpkg feature of sdl3-image. Its
+          # runtime dependencies must be present in the packaged DLL set.
+          find "$SDL_BIN" -maxdepth 1 -type f -iname '*png*.dll' -print -quit | grep -q .
+          find "$SDL_BIN" -maxdepth 1 -type f \
+            \( -iname 'zlib*.dll' -o -iname 'zlib1.dll' \) \
+            -print -quit | grep -q .
 
           file "$SDL_BIN/SDL3.dll"
           file "$SDL_BIN/SDL3_image.dll"

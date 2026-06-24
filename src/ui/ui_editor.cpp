@@ -285,37 +285,69 @@ namespace spintool
 		const std::filesystem::path working_path =
 			s_rom_export_path / reference_path.filename();
 
-		// Do not pre-test working_path with exists(): on some Linux/libstdc++
-		// combinations a missing destination can leave ENOENT in error_code and
-		// was incorrectly treated as a fatal inspection error. copy_file with
-		// skip_existing handles both cases safely:
-		//   - destination missing  -> copy is created;
-		//   - destination present  -> existing working ROM is kept untouched.
+		// The working ROM is persistent. If a file with the same name already
+		// exists in rom_export, load it exactly as it is and never overwrite it
+		// with the reference ROM. This explicit branch is also more reliable on
+		// Windows than relying on copy_file(skip_existing).
 		filesystem_error.clear();
-		const bool working_rom_created = std::filesystem::copy_file(
-			reference_path,
+		const bool working_rom_exists = std::filesystem::exists(
 			working_path,
-			std::filesystem::copy_options::skip_existing,
 			filesystem_error
 		);
-
 		if (filesystem_error)
 		{
-			std::cerr << "Could not prepare working ROM "
-				<< working_path << " from "
-				<< reference_path << ": "
+			std::cerr << "Could not inspect working ROM "
+				<< working_path << ": "
 				<< filesystem_error.message() << '\n';
 			return false;
 		}
 
-		if (working_rom_created)
+		bool working_rom_created = false;
+		if (working_rom_exists)
 		{
-			std::cout << "Created working ROM: "
+			filesystem_error.clear();
+			const bool is_regular_file = std::filesystem::is_regular_file(
+				working_path,
+				filesystem_error
+			);
+			if (filesystem_error || !is_regular_file)
+			{
+				std::cerr << "The working ROM path is not a readable file: "
+					<< working_path;
+				if (filesystem_error)
+				{
+					std::cerr << ": " << filesystem_error.message();
+				}
+				std::cerr << '\n';
+				return false;
+			}
+
+			std::cout << "Using existing working ROM: "
 				<< working_path << '\n';
 		}
 		else
 		{
-			std::cout << "Using existing working ROM: "
+			filesystem_error.clear();
+			working_rom_created = std::filesystem::copy_file(
+				reference_path,
+				working_path,
+				std::filesystem::copy_options::none,
+				filesystem_error
+			);
+			if (filesystem_error || !working_rom_created)
+			{
+				std::cerr << "Could not create working ROM "
+					<< working_path << " from "
+					<< reference_path;
+				if (filesystem_error)
+				{
+					std::cerr << ": " << filesystem_error.message();
+				}
+				std::cerr << '\n';
+				return false;
+			}
+
+			std::cout << "Created working ROM: "
 				<< working_path << '\n';
 		}
 
