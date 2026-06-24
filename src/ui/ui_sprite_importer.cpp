@@ -35,7 +35,6 @@ namespace spintool
 		settings.file_extension_filter = { ".png", ".gif", ".bmp" };
 		settings.tiled_previews = true;
 		settings.num_columns = 4;
-		settings.use_native_dialog = true;
 
 		std::optional<std::filesystem::path> selected_path = DrawFileSelector(settings, m_owning_ui, path_buffer);
 

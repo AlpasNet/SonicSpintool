@@ -1914,7 +1914,6 @@ namespace spintool
 			bonus_import_settings.file_extension_filter = { ".png" };
 			bonus_import_settings.tiled_previews = true;
 			bonus_import_settings.num_columns = 4;
-			bonus_import_settings.use_native_dialog = true;
 			bonus_import_settings.open_popup = std::exchange(
 				m_open_bonus_import_popup,
 				false
@@ -1944,7 +1943,6 @@ namespace spintool
 			tails_import_settings.file_extension_filter = { ".png" };
 			tails_import_settings.tiled_previews = true;
 			tails_import_settings.num_columns = 4;
-			tails_import_settings.use_native_dialog = true;
 			tails_import_settings.open_popup = std::exchange(
 				m_open_tails_import_popup,
 				false
@@ -1974,7 +1972,6 @@ namespace spintool
 			title_import_settings.file_extension_filter = { ".png" };
 			title_import_settings.tiled_previews = true;
 			title_import_settings.num_columns = 4;
-			title_import_settings.use_native_dialog = true;
 			title_import_settings.open_popup = std::exchange(
 				m_open_title_import_popup,
 				false
@@ -2003,7 +2000,6 @@ namespace spintool
 			main_import_settings.file_extension_filter = { ".png" };
 			main_import_settings.tiled_previews = true;
 			main_import_settings.num_columns = 4;
-			main_import_settings.use_native_dialog = true;
 			main_import_settings.open_popup = std::exchange(
 				m_open_main_import_popup,
 				false

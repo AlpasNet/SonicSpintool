@@ -100,7 +100,6 @@ target_link_libraries(spintool PRIVATE
 )
 
 if(WIN32)
-    target_link_libraries(spintool PRIVATE comdlg32)
     target_compile_definitions(spintool PRIVATE
         WIN32_LEAN_AND_MEAN
         NOMINMAX

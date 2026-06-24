@@ -3,7 +3,6 @@
 #include <optional>
 #include <filesystem>
 #include <vector>
-#include <string>
 
 namespace spintool
 {
@@ -21,7 +20,6 @@ namespace spintool
 		bool open_popup = false;
 		bool close_popup = false;
 		bool tiled_previews = false;
-		bool use_native_dialog = false;
 	};
 
 	std::optional<std::filesystem::path> DrawFileSelector(const FileSelectorSettings& settings, EditorUI& owning_ui, std::optional<std::filesystem::path> current_selection);

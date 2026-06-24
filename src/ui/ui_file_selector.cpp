@@ -1,7 +1,6 @@
 #include "ui/ui_file_selector.h"
 
 #include "ui/ui_editor.h"
-#include "ui/ui_image_io.h"
 
 #include "imgui.h"
 
@@ -10,20 +9,12 @@
 #include "SDL3/SDL_image.h"
 
 #include <algorithm>
-#include <cctype>
 #include <filesystem>
 #include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
-#include <system_error>
-#include <utility>
-
-#if defined(_WIN32)
-#include <windows.h>
-#include <commdlg.h>
-#endif
 
 namespace spintool
 {
@@ -31,119 +22,19 @@ namespace spintool
 namespace
 {
 
-bool ExtensionMatches(
-    const std::filesystem::path& filepath,
-    const std::vector<std::string>& extensions
-)
+std::string PathToUtf8(const std::filesystem::path& path)
 {
-    std::string file_extension = PathToUtf8(filepath.extension());
-    std::transform(
-        file_extension.begin(),
-        file_extension.end(),
-        file_extension.begin(),
-        [](const unsigned char character)
-        {
-            return static_cast<char>(std::tolower(character));
-        }
+#if defined(__cpp_lib_char8_t)
+    const std::u8string utf8_path = path.generic_u8string();
+
+    return std::string(
+        reinterpret_cast<const char*>(utf8_path.data()),
+        utf8_path.size()
     );
-
-    return std::any_of(
-        extensions.begin(),
-        extensions.end(),
-        [&file_extension](std::string expected_extension)
-        {
-            std::transform(
-                expected_extension.begin(),
-                expected_extension.end(),
-                expected_extension.begin(),
-                [](const unsigned char character)
-                {
-                    return static_cast<char>(std::tolower(character));
-                }
-            );
-            return file_extension == expected_extension;
-        }
-    );
-}
-
-#if defined(_WIN32)
-std::wstring BuildNativeFilter(const FileSelectorSettings& settings)
-{
-    std::wstring patterns;
-    for (std::size_t index = 0; index < settings.file_extension_filter.size(); ++index)
-    {
-        if (index != 0)
-        {
-            patterns.push_back(L';');
-        }
-        patterns.push_back(L'*');
-        for (const char character : settings.file_extension_filter[index])
-        {
-            patterns.push_back(static_cast<wchar_t>(
-                static_cast<unsigned char>(character)
-            ));
-        }
-    }
-    if (patterns.empty())
-    {
-        patterns = L"*.*";
-    }
-
-    std::wstring filter = L"Supported files (";
-    filter += patterns;
-    filter += L")";
-    filter.push_back(L'\0');
-    filter += patterns;
-    filter.push_back(L'\0');
-    filter += L"All files (*.*)";
-    filter.push_back(L'\0');
-    filter += L"*.*";
-    filter.push_back(L'\0');
-    filter.push_back(L'\0');
-    return filter;
-}
-
-std::optional<std::filesystem::path> OpenNativeFileDialog(
-    const FileSelectorSettings& settings
-)
-{
-    std::vector<wchar_t> selected_path(32768, L'\0');
-    const std::wstring filter = BuildNativeFilter(settings);
-
-    std::error_code path_error;
-    const std::filesystem::path absolute_directory =
-        std::filesystem::absolute(settings.target_directory, path_error);
-    const std::wstring initial_directory = path_error
-        ? settings.target_directory.wstring()
-        : absolute_directory.wstring();
-
-    OPENFILENAMEW dialog{};
-    dialog.lStructSize = sizeof(dialog);
-    dialog.lpstrFile = selected_path.data();
-    dialog.nMaxFile = static_cast<DWORD>(selected_path.size());
-    dialog.lpstrFilter = filter.c_str();
-    dialog.nFilterIndex = 1;
-    dialog.lpstrInitialDir = initial_directory.empty()
-        ? nullptr
-        : initial_directory.c_str();
-    dialog.Flags = OFN_EXPLORER |
-        OFN_FILEMUSTEXIST |
-        OFN_PATHMUSTEXIST |
-        OFN_NOCHANGEDIR;
-
-    if (GetOpenFileNameW(&dialog) == FALSE)
-    {
-        return std::nullopt;
-    }
-
-    const std::filesystem::path result{selected_path.data()};
-    if (!ExtensionMatches(result, settings.file_extension_filter))
-    {
-        return std::nullopt;
-    }
-    return result;
-}
+#else
+    return path.generic_u8string();
 #endif
+}
 
 struct FileSelectorEntry
 {
@@ -159,18 +50,6 @@ std::optional<std::filesystem::path> DrawFileSelector(
     std::optional<std::filesystem::path> current_selection
 )
 {
-    (void)owning_ui;
-#if defined(_WIN32)
-    if (settings.use_native_dialog)
-    {
-        if (settings.open_popup && settings.close_popup == false)
-        {
-            return OpenNativeFileDialog(settings);
-        }
-        return std::nullopt;
-    }
-#endif
-
     static std::vector<FileSelectorEntry> s_file_entries;
     static std::optional<std::filesystem::path> s_highlighted_path;
 
@@ -186,41 +65,42 @@ std::optional<std::filesystem::path> DrawFileSelector(
 
         s_highlighted_path = current_selection;
 
-        s_file_entries.clear();
-        std::error_code directory_error;
         std::filesystem::directory_iterator directory_file_it{
-            settings.target_directory,
-            directory_error
+            settings.target_directory
         };
-        if (!directory_error)
-        {
-            for (const std::filesystem::directory_entry& entry : directory_file_it)
+
+        s_file_entries.clear();
+
+        std::transform(
+            std::filesystem::begin(directory_file_it),
+            std::filesystem::end(directory_file_it),
+            std::back_inserter(s_file_entries),
+            [&settings](const std::filesystem::path& filepath)
             {
-                if (!entry.is_regular_file(directory_error))
-                {
-                    directory_error.clear();
-                    continue;
-                }
-
-                const std::filesystem::path filepath = entry.path();
-                if (!ExtensionMatches(filepath, settings.file_extension_filter))
-                {
-                    continue;
-                }
-
-                FileSelectorEntry new_entry{filepath};
-                if (settings.tiled_previews)
-                {
-                    SDLSurfaceHandle preview_surface = LoadImageFromPath(filepath);
-                    if (preview_surface)
+                const bool matches_extension = std::any_of(
+                    std::begin(settings.file_extension_filter),
+                    std::end(settings.file_extension_filter),
+                    [&filepath](const std::string_view ext)
                     {
-                        new_entry.thumbnail = SDLTextureHandle{
-                            SDL_CreateTextureFromSurface(
-                                Renderer::s_renderer,
-                                preview_surface.get()
-                            )
-                        };
+                        return filepath.extension() == ext;
                     }
+                );
+
+                if (matches_extension && settings.tiled_previews == true)
+                {
+                    const std::string filepath_utf8 =
+                        PathToUtf8(filepath);
+
+                    SDL_Texture* loaded_texture = IMG_LoadTexture(
+                        Renderer::s_renderer,
+                        filepath_utf8.c_str()
+                    );
+
+                    FileSelectorEntry new_entry{
+                        filepath,
+                        SDLTextureHandle{loaded_texture}
+                    };
+
                     if (new_entry.thumbnail != nullptr)
                     {
                         SDL_SetTextureScaleMode(
@@ -228,10 +108,13 @@ std::optional<std::filesystem::path> DrawFileSelector(
                             SDL_ScaleMode::SDL_SCALEMODE_NEAREST
                         );
                     }
+
+                    return new_entry;
                 }
-                s_file_entries.emplace_back(std::move(new_entry));
+
+                return FileSelectorEntry{filepath};
             }
-        }
+        );
     }
 
     if (ImGui::IsPopupOpen(popup_title.c_str()))
@@ -275,9 +158,13 @@ std::optional<std::filesystem::path> DrawFileSelector(
 
             for (const FileSelectorEntry& file_entry : s_file_entries)
             {
-                if (!ExtensionMatches(
-                    file_entry.filepath,
-                    settings.file_extension_filter
+                if (std::none_of(
+                    std::begin(settings.file_extension_filter),
+                    std::end(settings.file_extension_filter),
+                    [&file_entry](const std::string_view ext)
+                    {
+                        return file_entry.filepath.extension() == ext;
+                    }
                 ))
                 {
                     continue;
