@@ -1,6 +1,10 @@
 #include "render.h"
 
 #include <iostream>
+#include <fstream>
+#include <optional>
+#include <vector>
+#include <limits>
 
 #include "rom/spinball_rom.h"
 #include "rom/sprite.h"
@@ -15,6 +19,102 @@
 #include "backends/imgui_impl_sdlrenderer3.h"
 #include "backends/imgui_impl_sdl3.h"
 #include "ui/ui_palette.h"
+
+namespace
+{
+	std::optional<std::filesystem::path> g_pending_font_path;
+	std::filesystem::path g_active_font_path;
+	std::string g_font_error;
+	std::vector<unsigned char> g_font_data;
+
+	constexpr float k_custom_font_size = 18.0f;
+
+	bool LoadFontFile(const std::filesystem::path& font_path)
+	{
+		std::ifstream stream(font_path, std::ios::binary | std::ios::ate);
+		if (!stream.is_open())
+		{
+			g_font_error = "Could not open font file: " + font_path.string();
+			return false;
+		}
+
+		const std::streamoff file_size = stream.tellg();
+		if (file_size <= 0 ||
+			file_size > static_cast<std::streamoff>(std::numeric_limits<int>::max()))
+		{
+			g_font_error = "Invalid font file size: " + font_path.string();
+			return false;
+		}
+
+		g_font_data.resize(static_cast<size_t>(file_size));
+		stream.seekg(0, std::ios::beg);
+		if (!stream.read(
+			reinterpret_cast<char*>(g_font_data.data()),
+			static_cast<std::streamsize>(g_font_data.size())
+		))
+		{
+			g_font_data.clear();
+			g_font_error = "Could not read font file: " + font_path.string();
+			return false;
+		}
+
+		return true;
+	}
+
+	void ApplyPendingFontRequest()
+	{
+		if (!g_pending_font_path.has_value())
+		{
+			return;
+		}
+
+		const std::filesystem::path requested_path = *g_pending_font_path;
+		g_pending_font_path.reset();
+
+		ImGuiIO& io = ImGui::GetIO();
+		ImGui_ImplSDLRenderer3_DestroyFontsTexture();
+		io.Fonts->Clear();
+		g_font_data.clear();
+		g_font_error.clear();
+		g_active_font_path.clear();
+
+		ImFont* loaded_font = nullptr;
+		if (!requested_path.empty() && LoadFontFile(requested_path))
+		{
+			ImFontConfig config;
+			config.FontDataOwnedByAtlas = false;
+			config.OversampleH = 2;
+			config.OversampleV = 2;
+			config.PixelSnapH = false;
+
+			loaded_font = io.Fonts->AddFontFromMemoryTTF(
+				g_font_data.data(),
+				static_cast<int>(g_font_data.size()),
+				k_custom_font_size,
+				&config,
+				io.Fonts->GetGlyphRangesDefault()
+			);
+
+			if (loaded_font)
+			{
+				g_active_font_path = requested_path;
+			}
+			else
+			{
+				g_font_error = "Unsupported or damaged font file: " +
+					requested_path.string();
+			}
+		}
+
+		if (!loaded_font)
+		{
+			loaded_font = io.Fonts->AddFontDefault();
+		}
+
+		io.FontDefault = loaded_font;
+		io.Fonts->Build();
+	}
+}
 
 namespace spintool
 {
@@ -116,7 +216,7 @@ namespace spintool
 			std::cerr << "SDL_MaximizeWindow failed: " << SDL_GetError() << '\n';
 		}
 
-		if (!SDL_SetRenderDrawColor(s_renderer, 0, 0, 0, 255) ||
+		if (!SDL_SetRenderDrawColor(s_renderer, 5, 10, 28, 255) ||
 			!SDL_RenderClear(s_renderer))
 		{
 			std::cerr << "SDL renderer setup failed: " << SDL_GetError() << '\n';
@@ -126,7 +226,7 @@ namespace spintool
 
 		IMGUI_CHECKVERSION();
 		ImGui::CreateContext();
-		ImGui::StyleColorsDark();
+		ApplyModernTheme();
 
 		// The configurable font scale starts at 100%.
 		ImGuiIO& io = ImGui::GetIO();
@@ -149,6 +249,107 @@ namespace spintool
 		}
 
 		return true;
+	}
+
+	void Renderer::ApplyModernTheme()
+	{
+		ImGui::StyleColorsDark();
+		ImGuiStyle& style = ImGui::GetStyle();
+
+		style.WindowPadding = ImVec2(12.0f, 12.0f);
+		style.FramePadding = ImVec2(9.0f, 6.0f);
+		style.CellPadding = ImVec2(8.0f, 5.0f);
+		style.ItemSpacing = ImVec2(9.0f, 7.0f);
+		style.ItemInnerSpacing = ImVec2(7.0f, 5.0f);
+		style.ScrollbarSize = 15.0f;
+		style.GrabMinSize = 11.0f;
+
+		style.WindowRounding = 9.0f;
+		style.ChildRounding = 7.0f;
+		style.FrameRounding = 6.0f;
+		style.PopupRounding = 7.0f;
+		style.ScrollbarRounding = 9.0f;
+		style.GrabRounding = 6.0f;
+		style.TabRounding = 6.0f;
+
+		style.WindowBorderSize = 1.0f;
+		style.ChildBorderSize = 1.0f;
+		style.PopupBorderSize = 1.0f;
+		style.FrameBorderSize = 0.0f;
+		style.TabBorderSize = 0.0f;
+
+		auto& colours = style.Colors;
+		colours[ImGuiCol_Text] = ImVec4(0.93f, 0.95f, 1.00f, 1.00f);
+		colours[ImGuiCol_TextDisabled] = ImVec4(0.53f, 0.57f, 0.70f, 1.00f);
+		colours[ImGuiCol_WindowBg] = ImVec4(0.035f, 0.040f, 0.090f, 0.965f);
+		colours[ImGuiCol_ChildBg] = ImVec4(0.045f, 0.050f, 0.115f, 0.940f);
+		colours[ImGuiCol_PopupBg] = ImVec4(0.055f, 0.055f, 0.125f, 0.985f);
+		colours[ImGuiCol_Border] = ImVec4(0.34f, 0.25f, 0.72f, 0.72f);
+		colours[ImGuiCol_BorderShadow] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+
+		colours[ImGuiCol_FrameBg] = ImVec4(0.115f, 0.095f, 0.245f, 0.92f);
+		colours[ImGuiCol_FrameBgHovered] = ImVec4(0.23f, 0.16f, 0.48f, 1.00f);
+		colours[ImGuiCol_FrameBgActive] = ImVec4(0.10f, 0.30f, 0.65f, 1.00f);
+
+		colours[ImGuiCol_TitleBg] = ImVec4(0.18f, 0.08f, 0.36f, 1.00f);
+		colours[ImGuiCol_TitleBgActive] = ImVec4(0.12f, 0.24f, 0.58f, 1.00f);
+		colours[ImGuiCol_TitleBgCollapsed] = ImVec4(0.09f, 0.06f, 0.20f, 0.96f);
+		colours[ImGuiCol_MenuBarBg] = ImVec4(0.09f, 0.06f, 0.20f, 1.00f);
+
+		colours[ImGuiCol_ScrollbarBg] = ImVec4(0.025f, 0.030f, 0.075f, 0.85f);
+		colours[ImGuiCol_ScrollbarGrab] = ImVec4(0.35f, 0.20f, 0.72f, 0.90f);
+		colours[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.22f, 0.38f, 0.88f, 1.00f);
+		colours[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.10f, 0.48f, 0.98f, 1.00f);
+
+		colours[ImGuiCol_CheckMark] = ImVec4(0.35f, 0.70f, 1.00f, 1.00f);
+		colours[ImGuiCol_SliderGrab] = ImVec4(0.51f, 0.28f, 0.95f, 1.00f);
+		colours[ImGuiCol_SliderGrabActive] = ImVec4(0.16f, 0.58f, 1.00f, 1.00f);
+
+		colours[ImGuiCol_Button] = ImVec4(0.39f, 0.17f, 0.76f, 0.90f);
+		colours[ImGuiCol_ButtonHovered] = ImVec4(0.20f, 0.42f, 0.92f, 1.00f);
+		colours[ImGuiCol_ButtonActive] = ImVec4(0.10f, 0.29f, 0.72f, 1.00f);
+
+		colours[ImGuiCol_Header] = ImVec4(0.35f, 0.17f, 0.71f, 0.72f);
+		colours[ImGuiCol_HeaderHovered] = ImVec4(0.18f, 0.40f, 0.91f, 0.88f);
+		colours[ImGuiCol_HeaderActive] = ImVec4(0.10f, 0.31f, 0.76f, 1.00f);
+
+		colours[ImGuiCol_Separator] = ImVec4(0.34f, 0.25f, 0.72f, 0.66f);
+		colours[ImGuiCol_SeparatorHovered] = ImVec4(0.22f, 0.52f, 1.00f, 0.90f);
+		colours[ImGuiCol_SeparatorActive] = ImVec4(0.18f, 0.62f, 1.00f, 1.00f);
+		colours[ImGuiCol_ResizeGrip] = ImVec4(0.42f, 0.22f, 0.86f, 0.35f);
+		colours[ImGuiCol_ResizeGripHovered] = ImVec4(0.20f, 0.50f, 1.00f, 0.78f);
+		colours[ImGuiCol_ResizeGripActive] = ImVec4(0.12f, 0.64f, 1.00f, 1.00f);
+
+		colours[ImGuiCol_Tab] = ImVec4(0.15f, 0.09f, 0.32f, 0.96f);
+		colours[ImGuiCol_TabHovered] = ImVec4(0.22f, 0.43f, 0.92f, 1.00f);
+		colours[ImGuiCol_TabActive] = ImVec4(0.35f, 0.17f, 0.73f, 1.00f);
+		colours[ImGuiCol_TabUnfocused] = ImVec4(0.09f, 0.06f, 0.20f, 0.98f);
+		colours[ImGuiCol_TabUnfocusedActive] = ImVec4(0.18f, 0.18f, 0.46f, 1.00f);
+
+		colours[ImGuiCol_TableHeaderBg] = ImVec4(0.16f, 0.10f, 0.34f, 1.00f);
+		colours[ImGuiCol_TableBorderStrong] = ImVec4(0.34f, 0.25f, 0.72f, 0.78f);
+		colours[ImGuiCol_TableBorderLight] = ImVec4(0.20f, 0.17f, 0.43f, 0.70f);
+		colours[ImGuiCol_TableRowBg] = ImVec4(0.04f, 0.045f, 0.10f, 0.72f);
+		colours[ImGuiCol_TableRowBgAlt] = ImVec4(0.075f, 0.065f, 0.16f, 0.72f);
+
+		colours[ImGuiCol_TextSelectedBg] = ImVec4(0.24f, 0.39f, 0.92f, 0.48f);
+		colours[ImGuiCol_NavHighlight] = ImVec4(0.22f, 0.55f, 1.00f, 1.00f);
+		colours[ImGuiCol_ModalWindowDimBg] = ImVec4(0.015f, 0.010f, 0.055f, 0.76f);
+	}
+
+	void Renderer::RequestFont(const std::filesystem::path& font_path)
+	{
+		g_pending_font_path = font_path;
+	}
+
+	std::filesystem::path Renderer::GetActiveFontPath()
+	{
+		return g_active_font_path;
+	}
+
+	std::string Renderer::GetFontError()
+	{
+		return g_font_error;
 	}
 
 	void Renderer::Shutdown()
@@ -180,6 +381,7 @@ namespace spintool
 			return;
 		}
 
+		ApplyPendingFontRequest();
 		ImGui_ImplSDLRenderer3_NewFrame();
 		ImGui_ImplSDL3_NewFrame();
 		ImGui::NewFrame();

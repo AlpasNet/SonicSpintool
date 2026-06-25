@@ -53,6 +53,8 @@ namespace spintool::rom
 	{
 		bool success = false;
 		bool changed = false;
+		std::size_t remaining_bytes = 0U;
+		std::size_t compression_saved_bytes = 0U;
 		std::string message;
 	};
 

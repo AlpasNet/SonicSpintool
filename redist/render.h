@@ -4,6 +4,8 @@
 #include "types/sdl_handle_defs.h"
 #include "types/bounding_box.h"
 #include <mutex>
+#include <filesystem>
+#include <string>
 
 namespace spintool::rom
 {
@@ -24,6 +26,15 @@ namespace spintool
 		static void Shutdown();
 		static void NewFrame();
 		static void Render();
+
+		// Apply SpinTool's modern violet-to-blue interface styling.
+		static void ApplyModernTheme();
+
+		// Font changes are queued and applied safely before the next ImGui frame.
+		// Passing an empty path restores Dear ImGui's built-in default font.
+		static void RequestFont(const std::filesystem::path& font_path);
+		[[nodiscard]] static std::filesystem::path GetActiveFontPath();
+		[[nodiscard]] static std::string GetFontError();
 
 		static SDLPaletteHandle CreateSDLPalette(const rom::Palette& palette);
 		static SDLPaletteHandle CreateSDLPaletteForSet(const rom::PaletteSet& palette_set);

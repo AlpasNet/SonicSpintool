@@ -26,6 +26,8 @@ namespace spintool
 		constexpr Uint32 kIntroPaletteCount = 4U;
 		constexpr Uint32 kTitleScreenPaletteOffset = 0x0009BD3AU;
 		constexpr Uint32 kTitleScreenPaletteCount = 4U;
+		constexpr Uint32 kSharedMenuPaletteOffset = 0x0000115CU;
+		constexpr Uint32 kSharedMenuPaletteCount = 4U;
 
 		enum class PaletteGroup
 		{
@@ -33,6 +35,7 @@ namespace spintool
 			SegaLogo,
 			Introduction,
 			TitleScreen,
+			SharedMenu,
 			Other
 		};
 
@@ -54,6 +57,13 @@ namespace spintool
 
 		PaletteGroup GetPaletteGroup(const Uint32 offset)
 		{
+			// These four lines live inside the broad 48-line table, so identify
+			// the shared Options/Hi-Score/Credits set before the generic range.
+			if (IsPaletteLineInRange(
+				offset, kSharedMenuPaletteOffset, kSharedMenuPaletteCount))
+			{
+				return PaletteGroup::SharedMenu;
+			}
 			if (IsPaletteLineInRange(offset, kLevelPaletteOffset, kLevelPaletteCount))
 			{
 				return PaletteGroup::Level;
@@ -85,6 +95,8 @@ namespace spintool
 					return "Introduction";
 				case PaletteGroup::TitleScreen:
 					return "Title Screen";
+				case PaletteGroup::SharedMenu:
+					return "Options / Hi-Score / Credits";
 				case PaletteGroup::Other:
 				default:
 					return "Other Palettes";
@@ -107,6 +119,9 @@ namespace spintool
 					break;
 				case PaletteGroup::TitleScreen:
 					range_start = kTitleScreenPaletteOffset;
+					break;
+				case PaletteGroup::SharedMenu:
+					range_start = kSharedMenuPaletteOffset;
 					break;
 				case PaletteGroup::Other:
 				default:

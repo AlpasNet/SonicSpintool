@@ -1519,6 +1519,19 @@ namespace spintool::rom
 
 		if (written_pixels == 0U)
 		{
+			for (const EditableArtBlock& block : art_blocks)
+			{
+				if (block.original_capacity >= block.current_compressed_size)
+				{
+					result.remaining_bytes +=
+						block.original_capacity - block.current_compressed_size;
+				}
+				if (block.data.size() > block.current_compressed_size)
+				{
+					result.compression_saved_bytes +=
+						block.data.size() - block.current_compressed_size;
+				}
+			}
 			result.success = true;
 			result.changed = false;
 			result.message =
@@ -1562,6 +1575,11 @@ namespace spintool::rom
 		{
 			EditableArtBlock& block = *prepared.block;
 			const std::vector<Uint8>& compressed = prepared.compression.data;
+			result.remaining_bytes += block.original_capacity - compressed.size();
+			if (block.data.size() > compressed.size())
+			{
+				result.compression_saved_bytes += block.data.size() - compressed.size();
+			}
 			std::copy(
 				compressed.begin(),
 				compressed.end(),

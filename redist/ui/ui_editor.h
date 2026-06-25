@@ -17,6 +17,7 @@
 #include <memory>
 #include <mutex>
 #include <vector>
+#include <string>
 
 namespace spintool
 {
@@ -92,7 +93,13 @@ namespace spintool
 		EditorPaletteViewer m_palette_viewer;
 		EditorImageImporter m_sprite_importer;
 
+		void RefreshAvailableFonts();
+		void SelectFont(const std::filesystem::path& font_path);
+
 		bool m_change_path_popup_open = false;
 		float m_font_scale = 1.0f;
+		std::filesystem::path m_font_path;
+		std::vector<std::filesystem::path> m_available_fonts;
+		bool m_fonts_scanned = false;
 	};
 }

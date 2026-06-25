@@ -7,6 +7,7 @@
 #include <cassert>
 #include <filesystem>
 #include "rom/ssc_compressor.h"
+#include "rom/menu_background_decoder.h"
 #include "editor/editor_brush.h"
 #include "nlohmann/json.hpp"
 #include <fstream>
@@ -2897,11 +2898,21 @@ namespace spintool
 
 				RenderTileLayoutRequest request;
 
-				request.tileset_address = rom::OptionsMenuTileset;
-				request.tile_brushes_address = rom::OptionsMenuTileBrushes;
-				request.tile_brushes_address_end = 0x000BE1BC;
-				request.tile_layout_address = rom::OptionsMenuTileLayout;
-				request.tile_layout_address_end = 0x000BE248;
+				request.tileset_address =
+					rom::MenuBackgroundDecoder::ResolveArtHeaderOffset(
+						m_owning_ui.GetROM());
+				request.tile_brushes_address =
+					rom::MenuBackgroundDecoder::ResolveBrushesOffset(
+						m_owning_ui.GetROM());
+				request.tile_brushes_address_end =
+					rom::MenuBackgroundDecoder::ResolveBrushesEndOffset(
+						m_owning_ui.GetROM());
+				request.tile_layout_address =
+					rom::MenuBackgroundDecoder::ResolveLayoutOffset(
+						m_owning_ui.GetROM());
+				request.tile_layout_address_end =
+					rom::MenuBackgroundDecoder::ResolveLayoutEndOffset(
+						m_owning_ui.GetROM());
 
 				request.tile_brush_width = 4;
 				request.tile_brush_height = 4;

@@ -17,6 +17,9 @@
 #include <fstream>
 #include <iostream>
 #include <system_error>
+#include <cstdlib>
+#include <cctype>
+#include <set>
 
 #include "serialisation/editor_serialiser.h"
 
@@ -58,6 +61,81 @@ namespace spintool
 		{
 			std::ifstream stream(path, std::ios::binary);
 			return stream.is_open();
+		}
+
+		std::string Lowercase(std::string value)
+		{
+			std::transform(
+				value.begin(),
+				value.end(),
+				value.begin(),
+				[](unsigned char character)
+				{
+					return static_cast<char>(std::tolower(character));
+				}
+			);
+			return value;
+		}
+
+		bool IsSupportedFontFile(const std::filesystem::path& path)
+		{
+			const std::string extension = Lowercase(path.extension().string());
+			return extension == ".ttf" || extension == ".otf";
+		}
+
+		std::vector<std::filesystem::path> GetFontDirectories()
+		{
+			std::vector<std::filesystem::path> directories;
+			std::error_code error;
+			directories.push_back(std::filesystem::current_path(error) / "fonts");
+
+#if defined(_WIN32)
+			if (const char* windows_directory = std::getenv("WINDIR"))
+			{
+				directories.emplace_back(
+					std::filesystem::path{windows_directory} / "Fonts"
+				);
+			}
+			if (const char* local_app_data = std::getenv("LOCALAPPDATA"))
+			{
+				directories.emplace_back(
+					std::filesystem::path{local_app_data} / "Microsoft" /
+					"Windows" / "Fonts"
+				);
+			}
+#elif defined(__APPLE__)
+			directories.emplace_back("/System/Library/Fonts");
+			directories.emplace_back("/Library/Fonts");
+			if (const char* home = std::getenv("HOME"))
+			{
+				directories.emplace_back(
+					std::filesystem::path{home} / "Library" / "Fonts"
+				);
+			}
+#else
+			directories.emplace_back("/usr/share/fonts");
+			directories.emplace_back("/usr/local/share/fonts");
+			if (const char* home = std::getenv("HOME"))
+			{
+				directories.emplace_back(std::filesystem::path{home} / ".fonts");
+				directories.emplace_back(
+					std::filesystem::path{home} / ".local" / "share" / "fonts"
+				);
+			}
+#endif
+
+			return directories;
+		}
+
+		std::string FontDisplayName(const std::filesystem::path& path)
+		{
+			std::string name = path.stem().string();
+			const std::string family = path.parent_path().filename().string();
+			if (!family.empty() && Lowercase(family) != "fonts")
+			{
+				name += "  (" + family + ")";
+			}
+			return name;
 		}
 
 	}
@@ -192,6 +270,7 @@ namespace spintool
 			nlohmann::json& writer = serialiser->Writer();
 			writer["font_scale_percent"] =
 				static_cast<int>(m_font_scale * 100.0f + 0.5f);
+			writer["font_path"] = m_font_path.string();
 		}
 		catch (const std::exception& error)
 		{
@@ -204,6 +283,7 @@ namespace spintool
 	{
 		const std::filesystem::path config_path = s_config_path / "ui.json";
 		m_font_scale = 1.0f;
+		m_font_path.clear();
 
 		if (Deserialiser::FileExists(config_path))
 		{
@@ -221,6 +301,14 @@ namespace spintool
 							std::clamp(entry->get<int>(), 50, 250);
 						m_font_scale = static_cast<float>(percent) / 100.0f;
 					}
+
+					auto font_entry = reader.find("font_path");
+					if (font_entry != reader.end() && font_entry->is_string())
+					{
+						m_font_path = std::filesystem::path{
+							font_entry->get<std::string>()
+						};
+					}
 				}
 			}
 			catch (const std::exception& error)
@@ -231,6 +319,79 @@ namespace spintool
 		}
 
 		ImGui::GetIO().FontGlobalScale = m_font_scale;
+		Renderer::RequestFont(m_font_path);
+	}
+
+	void EditorUI::RefreshAvailableFonts()
+	{
+		m_available_fonts.clear();
+		std::set<std::filesystem::path> unique_fonts;
+
+		if (!m_font_path.empty())
+		{
+			std::error_code selected_font_error;
+			if (std::filesystem::is_regular_file(m_font_path, selected_font_error) &&
+				IsSupportedFontFile(m_font_path))
+			{
+				unique_fonts.insert(m_font_path);
+			}
+		}
+
+		for (const std::filesystem::path& directory : GetFontDirectories())
+		{
+			std::error_code error;
+			if (!std::filesystem::is_directory(directory, error))
+			{
+				continue;
+			}
+
+			std::filesystem::recursive_directory_iterator iterator{
+				directory,
+				std::filesystem::directory_options::skip_permission_denied,
+				error
+			};
+			const std::filesystem::recursive_directory_iterator end;
+
+			while (iterator != end && unique_fonts.size() < 1500)
+			{
+				if (!error && iterator->is_regular_file(error) &&
+					IsSupportedFontFile(iterator->path()))
+				{
+					unique_fonts.insert(iterator->path());
+				}
+
+				error.clear();
+				iterator.increment(error);
+			}
+		}
+
+		m_available_fonts.assign(unique_fonts.begin(), unique_fonts.end());
+		std::sort(
+			m_available_fonts.begin(),
+			m_available_fonts.end(),
+			[](const std::filesystem::path& left,
+				const std::filesystem::path& right)
+			{
+				const std::string left_name =
+					Lowercase(left.filename().string());
+				const std::string right_name =
+					Lowercase(right.filename().string());
+				if (left_name != right_name)
+				{
+					return left_name < right_name;
+				}
+				return left.string() < right.string();
+			}
+		);
+
+		m_fonts_scanned = true;
+	}
+
+	void EditorUI::SelectFont(const std::filesystem::path& font_path)
+	{
+		m_font_path = font_path;
+		Renderer::RequestFont(m_font_path);
+		SaveUIConfig();
 	}
 
 	bool EditorUI::AttemptLoadROM(const std::filesystem::path& rom_path)
@@ -359,8 +520,44 @@ namespace spintool
 		float menu_bar_height = 0;
 		bool open_rom_popup = false;
 
+		const ImGuiViewport* viewport = ImGui::GetMainViewport();
+		const ImVec2 viewport_min = viewport->Pos;
+		const ImVec2 viewport_max{
+			viewport->Pos.x + viewport->Size.x,
+			viewport->Pos.y + viewport->Size.y
+		};
+		ImGui::GetBackgroundDrawList()->AddRectFilledMultiColor(
+			viewport_min,
+			viewport_max,
+			IM_COL32(39, 12, 72, 255),
+			IM_COL32(8, 54, 112, 255),
+			IM_COL32(5, 24, 62, 255),
+			IM_COL32(22, 8, 52, 255)
+		);
+
 		if (ImGui::BeginMainMenuBar())
 		{
+			const ImVec2 menu_min = ImGui::GetWindowPos();
+			const ImVec2 menu_size = ImGui::GetWindowSize();
+			const ImVec2 menu_max{
+				menu_min.x + menu_size.x,
+				menu_min.y + menu_size.y
+			};
+			ImDrawList* menu_draw_list = ImGui::GetWindowDrawList();
+			menu_draw_list->AddRectFilledMultiColor(
+				menu_min,
+				menu_max,
+				IM_COL32(103, 35, 181, 255),
+				IM_COL32(25, 107, 222, 255),
+				IM_COL32(13, 66, 157, 255),
+				IM_COL32(68, 20, 132, 255)
+			);
+			menu_draw_list->AddLine(
+				ImVec2(menu_min.x, menu_max.y - 1.0f),
+				ImVec2(menu_max.x, menu_max.y - 1.0f),
+				IM_COL32(93, 181, 255, 220),
+				1.0f
+			);
 			if (IsROMLoaded())
 			{
 				/*if (ImGui::BeginMenu("File"))
@@ -431,8 +628,74 @@ namespace spintool
 
 			if (ImGui::BeginMenu("Settings"))
 			{
+				if (!m_fonts_scanned)
+				{
+					RefreshAvailableFonts();
+				}
+
+				ImGui::TextUnformatted("Interface font");
+				const std::string font_preview = m_font_path.empty()
+					? "Default"
+					: FontDisplayName(m_font_path);
+				ImGui::SetNextItemWidth(300.0f);
+				if (ImGui::BeginCombo("##interface_font", font_preview.c_str()))
+				{
+					const bool default_selected = m_font_path.empty();
+					if (ImGui::Selectable("Default", default_selected))
+					{
+						SelectFont({});
+					}
+					if (default_selected)
+					{
+						ImGui::SetItemDefaultFocus();
+					}
+
+					ImGuiListClipper clipper;
+					clipper.Begin(static_cast<int>(m_available_fonts.size()));
+					while (clipper.Step())
+					{
+						for (int index = clipper.DisplayStart;
+							index < clipper.DisplayEnd;
+							++index)
+						{
+							const std::filesystem::path& path =
+								m_available_fonts[static_cast<size_t>(index)];
+							const std::string label = FontDisplayName(path);
+							const bool selected = path == m_font_path;
+							ImGui::PushID(index);
+							if (ImGui::Selectable(label.c_str(), selected))
+							{
+								SelectFont(path);
+							}
+							if (ImGui::IsItemHovered())
+							{
+								ImGui::SetTooltip("%s", path.string().c_str());
+							}
+							ImGui::PopID();
+						}
+					}
+					ImGui::EndCombo();
+				}
+
+				if (ImGui::MenuItem("Refresh installed fonts"))
+				{
+					RefreshAvailableFonts();
+				}
+
+				const std::string font_error = Renderer::GetFontError();
+				if (!font_error.empty())
+				{
+					ImGui::PushStyleColor(
+						ImGuiCol_Text,
+						ImVec4(1.0f, 0.52f, 0.58f, 1.0f)
+					);
+					ImGui::TextWrapped("%s", font_error.c_str());
+					ImGui::PopStyleColor();
+				}
+
+				ImGui::Separator();
 				ImGui::TextUnformatted("Font size");
-				ImGui::SetNextItemWidth(180.0f);
+				ImGui::SetNextItemWidth(220.0f);
 				int font_percent =
 					static_cast<int>(m_font_scale * 100.0f + 0.5f);
 				if (ImGui::SliderInt(
@@ -453,11 +716,11 @@ namespace spintool
 					SaveUIConfig();
 				}
 
-				if (ImGui::MenuItem("Reset to 100%"))
+				if (ImGui::MenuItem("Reset font settings"))
 				{
 					m_font_scale = 1.0f;
 					ImGui::GetIO().FontGlobalScale = m_font_scale;
-					SaveUIConfig();
+					SelectFont({});
 				}
 				ImGui::EndMenu();
 			}

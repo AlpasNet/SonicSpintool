@@ -43,6 +43,7 @@ add_executable(spintool
         src/rom/bonus_stage_decoder.cpp
         src/rom/tails_plane_decoder.cpp
         src/rom/title_screen_decoder.cpp
+        src/rom/menu_background_decoder.cpp
         src/rom/palette.cpp
         src/rom/rom_asset_definitions.cpp
         src/rom/rom_data.cpp

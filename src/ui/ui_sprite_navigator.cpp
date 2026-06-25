@@ -4,6 +4,7 @@
 #include "rom/bonus_stage_decoder.h"
 #include "rom/tails_plane_decoder.h"
 #include "rom/title_screen_decoder.h"
+#include "rom/menu_background_decoder.h"
 #include "ui/ui_editor.h"
 #include "ui/ui_file_selector.h"
 
@@ -34,6 +35,41 @@
 
 namespace
 {
+	std::size_t CountModifiedPixels(
+		const std::vector<Uint8>& current_pixels,
+		const std::vector<Uint8>& imported_pixels
+	)
+	{
+		const std::size_t common_size = std::min(
+			current_pixels.size(), imported_pixels.size()
+		);
+		std::size_t changed = 0U;
+		for (std::size_t index = 0U; index < common_size; ++index)
+		{
+			if (current_pixels[index] != imported_pixels[index])
+			{
+				++changed;
+			}
+		}
+		changed += current_pixels.size() > common_size
+			? current_pixels.size() - common_size
+			: imported_pixels.size() - common_size;
+		return changed;
+	}
+
+	std::string FormatImportStatistics(
+		const std::size_t modified_pixels,
+		const std::size_t remaining_bytes,
+		const std::size_t compression_saved_bytes
+	)
+	{
+		std::ostringstream message;
+		message << "Pixels modified: " << modified_pixels
+			<< "\nSpace remaining: " << remaining_bytes << " bytes"
+			<< "\nCompression gain: " << compression_saved_bytes << " bytes";
+		return message.str();
+	}
+
 	std::string PathToUtf8(const std::filesystem::path& path)
 	{
 #if defined(__cpp_lib_char8_t)
@@ -333,7 +369,8 @@ namespace
 		const std::vector<Uint8>& palette_line_map,
 		const std::vector<Uint8>& preferred_indices,
 		const int preferred_width,
-		const int preferred_height
+		const int preferred_height,
+		const bool allow_opaque_colour_zero
 	)
 	{
 		std::vector<Uint8> output;
@@ -379,14 +416,30 @@ namespace
 			if (alpha < 0x80U) return 0U;
 			const Uint8 line = palette_line_for(pixel_index);
 			const spintool::rom::Palette& palette = *palette_set.palette_lines[line];
+			if (allow_opaque_colour_zero)
+			{
+				const spintool::rom::Colour colour_zero =
+					palette.palette_swatches[0U].GetUnpacked();
+				if (red == colour_zero.r && green == colour_zero.g &&
+					blue == colour_zero.b)
+				{
+					// Plane backgrounds can safely use palette colour zero. Treat an
+					// opaque flattened black/background pixel exactly like the
+					// transparent index exported by SpinTool, so it does not consume a
+					// dedicated pattern tile.
+					return 0U;
+				}
+			}
 			const Uint8 preferred_local = has_preferred
 				? static_cast<Uint8>(preferred_indices[pixel_index] & 0x0FU)
 				: 0xFFU;
-			Uint8 best_local = 1U;
+			Uint8 best_local = allow_opaque_colour_zero ? 0U : 1U;
 			Uint32 best_distance = std::numeric_limits<Uint32>::max();
-			// Local colour zero is transparent for Mega Drive sprites, so opaque
-			// PNG pixels are quantised only to visible entries 1-15.
-			for (Uint8 local = 1U; local < 16U; ++local)
+			// Sprite/title imports keep local colour zero transparent. The shared
+			// menu is a tile plane, so its importer may intentionally use colour
+			// zero for the backdrop.
+			for (Uint8 local = allow_opaque_colour_zero ? 0U : 1U;
+				local < 16U; ++local)
 			{
 				const spintool::rom::Colour colour =
 					palette.palette_swatches[local].GetUnpacked();
@@ -695,6 +748,9 @@ namespace spintool
 			m_bonus_stage_status = "The PNG could not be converted to indexed pixels.";
 			return;
 		}
+		const std::size_t modified_pixel_count = CountModifiedPixels(
+			preferred_indices, indexed_pixels
+		);
 
 		rom::SpinballROM& rom = m_owning_ui.GetROM();
 		const std::filesystem::path saved_rom_path = rom.m_filepath;
@@ -740,7 +796,11 @@ namespace spintool
 		}
 		if (!import_result.changed)
 		{
-			m_bonus_stage_status = import_result.message;
+			m_bonus_stage_status = FormatImportStatistics(
+				modified_pixel_count,
+				import_result.remaining_bytes,
+				import_result.compression_saved_bytes
+			);
 			return;
 		}
 
@@ -798,16 +858,11 @@ namespace spintool
 
 		LoadBonusStageImages();
 
-		std::error_code absolute_path_error;
-		const std::filesystem::path absolute_saved_path =
-			std::filesystem::absolute(saved_rom_path, absolute_path_error);
-		const std::filesystem::path& displayed_path = absolute_path_error
-			? saved_rom_path
-			: absolute_saved_path;
-
-		m_bonus_stage_status = import_result.message ; /*+
-			". ROM saved, reloaded and verified from disk: " +
-			PathToUtf8(displayed_path);*/
+		m_bonus_stage_status = FormatImportStatistics(
+			modified_pixel_count,
+			import_result.remaining_bytes,
+			import_result.compression_saved_bytes
+		);
 	}
 
 
@@ -923,6 +978,9 @@ namespace spintool
 			m_tails_plane_status = "The PNG could not be converted to indexed pixels.";
 			return;
 		}
+		const std::size_t modified_pixel_count = CountModifiedPixels(
+			preferred_indices, indexed_pixels
+		);
 
 		rom::SpinballROM& working_rom = m_owning_ui.GetROM();
 		const std::filesystem::path saved_rom_path = working_rom.m_filepath;
@@ -965,7 +1023,11 @@ namespace spintool
 		}
 		if (!import_result.changed)
 		{
-			m_tails_plane_status = import_result.message;
+			m_tails_plane_status = FormatImportStatistics(
+				modified_pixel_count,
+				import_result.remaining_bytes,
+				import_result.compression_saved_bytes
+			);
 			return;
 		}
 
@@ -1018,7 +1080,11 @@ namespace spintool
 		}
 
 		LoadTailsPlaneImages();
-		m_tails_plane_status = import_result.message;
+		m_tails_plane_status = FormatImportStatistics(
+			modified_pixel_count,
+			import_result.remaining_bytes,
+			import_result.compression_saved_bytes
+		);
 	}
 
 	void EditorSpriteNavigator::ExportTailsPlaneImage(const std::size_t image_index)
@@ -1222,13 +1288,17 @@ namespace spintool
 			import_palette_line_map,
 			preferred_indices,
 			preferred_width,
-			preferred_height
+			preferred_height,
+			false
 		);
 		if (indexed_pixels.empty())
 		{
 			m_title_screen_status = "The PNG could not be converted to indexed pixels.";
 			return;
 		}
+		const std::size_t modified_pixel_count = CountModifiedPixels(
+			preferred_indices, indexed_pixels
+		);
 
 		rom::SpinballROM& working_rom = m_owning_ui.GetROM();
 		const std::filesystem::path saved_rom_path = working_rom.m_filepath;
@@ -1271,7 +1341,11 @@ namespace spintool
 		}
 		if (!import_result.changed)
 		{
-			m_title_screen_status = import_result.message;
+			m_title_screen_status = FormatImportStatistics(
+				modified_pixel_count,
+				import_result.remaining_bytes,
+				import_result.compression_saved_bytes
+			);
 			return;
 		}
 
@@ -1324,7 +1398,11 @@ namespace spintool
 		}
 
 		LoadTitleScreenImages();
-		m_title_screen_status = import_result.message;
+		m_title_screen_status = FormatImportStatistics(
+			modified_pixel_count,
+			import_result.remaining_bytes,
+			import_result.compression_saved_bytes
+		);
 	}
 
 	void EditorSpriteNavigator::ExportTitleScreenImage(const std::size_t image_index)
@@ -1422,6 +1500,301 @@ namespace spintool
 		}
 	}
 
+	void EditorSpriteNavigator::LoadMenuBackgroundImages()
+	{
+		m_result_display_mode = ResultDisplayMode::MENU_BACKGROUND_FRAMES;
+		m_menu_background_images.clear();
+		m_menu_background_warnings.clear();
+		m_menu_background_status.clear();
+		m_menu_background_palette_set.reset();
+		m_selected_menu_background_image = -1;
+
+		const rom::MenuBackgroundDecodeResult decode_result =
+			rom::MenuBackgroundDecoder::Decode(m_owning_ui.GetROM());
+		m_menu_background_warnings = decode_result.warnings;
+		m_menu_background_palette_set = decode_result.palette_set;
+		if (!decode_result.error.empty())
+		{
+			m_menu_background_status = "Error: " + decode_result.error;
+			return;
+		}
+
+		for (const rom::MenuBackgroundFrame& decoded_frame : decode_result.frames)
+		{
+			if (!decoded_frame.sprite) continue;
+			MenuBackgroundFramePreview preview;
+			preview.category = decoded_frame.category;
+			preview.name = decoded_frame.name;
+			preview.usage = decoded_frame.usage;
+			preview.frame_id = decoded_frame.frame_id;
+			preview.palette_line_map = decoded_frame.palette_line_map;
+			std::shared_ptr<const rom::Sprite> frame_sprite = decoded_frame.sprite;
+			preview.texture = std::make_shared<UISpriteTexture>(frame_sprite);
+			m_menu_background_images.emplace_back(std::move(preview));
+		}
+		if (!m_menu_background_palette_set)
+		{
+			m_menu_background_status =
+				"The Options/Hi-Score/Credits palette set could not be loaded.";
+			m_menu_background_images.clear();
+			return;
+		}
+		if (m_menu_background_images.empty())
+		{
+			m_menu_background_status = "No shared menu background could be decoded.";
+		}
+	}
+
+	void EditorSpriteNavigator::ImportMenuBackgroundImage(
+		const std::filesystem::path& path,
+		const std::size_t image_index)
+	{
+		m_result_display_mode = ResultDisplayMode::MENU_BACKGROUND_FRAMES;
+		if (image_index >= m_menu_background_images.size())
+		{
+			m_menu_background_status =
+				"The selected shared menu background no longer exists.";
+			return;
+		}
+		const std::string path_utf8 = PathToUtf8(path);
+		SDLSurfaceHandle loaded_image{ IMG_Load(path_utf8.c_str()) };
+		if (!loaded_image)
+		{
+			m_menu_background_status = "Could not load PNG: " + path_utf8;
+			return;
+		}
+
+		const MenuBackgroundFramePreview target = m_menu_background_images[image_index];
+		if (!m_menu_background_palette_set)
+		{
+			m_menu_background_status =
+				"The four Options/Hi-Score/Credits palettes are not loaded.";
+			return;
+		}
+		if (!target.texture || !target.texture->sprite)
+		{
+			m_menu_background_status =
+				"The selected shared menu background has no sprite data.";
+			return;
+		}
+		int preferred_width = 0;
+		int preferred_height = 0;
+		const std::vector<Uint8> preferred_indices = RenderSpriteIndexedPixels(
+			*target.texture->sprite,
+			*m_menu_background_palette_set,
+			preferred_width,
+			preferred_height);
+		const std::vector<Uint8> indexed_pixels = ConvertSurfaceToTitleIndexed(
+			loaded_image.get(),
+			*m_menu_background_palette_set,
+			target.palette_line_map,
+			preferred_indices,
+			preferred_width,
+			preferred_height,
+			true);
+		if (indexed_pixels.empty())
+		{
+			m_menu_background_status =
+				"The PNG could not be converted to the shared menu palette indices.";
+			return;
+		}
+		const std::size_t modified_pixel_count = CountModifiedPixels(
+			preferred_indices, indexed_pixels
+		);
+
+		rom::SpinballROM& working_rom = m_owning_ui.GetROM();
+		const std::filesystem::path saved_rom_path = working_rom.m_filepath;
+		if (saved_rom_path.empty())
+		{
+			m_menu_background_status =
+				"The working ROM has no file path and cannot be saved.";
+			return;
+		}
+		const std::vector<Uint8> original_rom_buffer = working_rom.m_buffer;
+		const std::filesystem::path reference_rom_path =
+			m_owning_ui.GetReferenceROMPath();
+		if (reference_rom_path.empty())
+		{
+			m_menu_background_status =
+				"No reference ROM is associated with the current working ROM.";
+			return;
+		}
+		rom::SpinballROM reference_rom;
+		if (!reference_rom.LoadROMFromPath(reference_rom_path))
+		{
+			m_menu_background_status = "Could not load reference ROM: " +
+				PathToUtf8(reference_rom_path);
+			return;
+		}
+
+		const rom::MenuBackgroundImportResult import_result =
+			rom::MenuBackgroundDecoder::ImportIndexedImage(
+				working_rom,
+				reference_rom,
+				indexed_pixels,
+				loaded_image->w,
+				loaded_image->h);
+		if (!import_result.success)
+		{
+			m_menu_background_status = "Import failed: " + import_result.message;
+			return;
+		}
+		if (!import_result.changed)
+		{
+			m_menu_background_status = FormatImportStatistics(
+				modified_pixel_count,
+				import_result.remaining_bytes,
+				import_result.compression_saved_bytes
+			);
+			return;
+		}
+
+		std::filesystem::path backup_path = saved_rom_path;
+		backup_path += ".bak";
+		std::error_code backup_error;
+		if (!std::filesystem::exists(backup_path, backup_error))
+		{
+			std::filesystem::copy_file(
+				saved_rom_path,
+				backup_path,
+				std::filesystem::copy_options::none,
+				backup_error);
+		}
+		if (backup_error)
+		{
+			working_rom.m_buffer = original_rom_buffer;
+			m_menu_background_status = "Could not create ROM backup: " +
+				backup_error.message();
+			return;
+		}
+
+		working_rom.SaveROM();
+		std::ifstream saved_rom_file(saved_rom_path, std::ios::binary);
+		if (!saved_rom_file)
+		{
+			m_menu_background_status =
+				"Import changed the in-memory ROM, but the saved ROM could not be reopened: " +
+				PathToUtf8(saved_rom_path);
+			return;
+		}
+		const std::vector<Uint8> disk_buffer{
+			std::istreambuf_iterator<char>(saved_rom_file),
+			std::istreambuf_iterator<char>{}
+		};
+		if (disk_buffer != working_rom.m_buffer)
+		{
+			m_menu_background_status =
+				"Import changed the in-memory ROM, but disk verification failed: " +
+				PathToUtf8(saved_rom_path);
+			return;
+		}
+		if (!working_rom.LoadROMFromPath(saved_rom_path))
+		{
+			m_menu_background_status =
+				"The ROM was written and verified, but SpinTool could not reload it: " +
+				PathToUtf8(saved_rom_path);
+			return;
+		}
+		LoadMenuBackgroundImages();
+		m_menu_background_status = FormatImportStatistics(
+			modified_pixel_count,
+			import_result.remaining_bytes,
+			import_result.compression_saved_bytes
+		);
+	}
+
+	void EditorSpriteNavigator::ExportMenuBackgroundImage(
+		const std::size_t image_index)
+	{
+		m_menu_background_status.clear();
+		if (image_index >= m_menu_background_images.size())
+		{
+			m_menu_background_status =
+				"The selected shared menu background no longer exists.";
+			return;
+		}
+		const MenuBackgroundFramePreview& image =
+			m_menu_background_images[image_index];
+		if (!image.texture || !image.texture->sprite)
+		{
+			m_menu_background_status =
+				"The selected shared menu background has no image.";
+			return;
+		}
+		if (!m_menu_background_palette_set)
+		{
+			m_menu_background_status =
+				"The four Options/Hi-Score/Credits palettes are not loaded.";
+			return;
+		}
+
+		constexpr const char* filename = "shared_menu_background.png";
+		std::filesystem::path export_path =
+			m_owning_ui.GetSpriteExportPath().append(filename);
+		std::error_code directory_error;
+		std::filesystem::create_directories(
+			export_path.parent_path(), directory_error);
+		if (directory_error)
+		{
+			m_menu_background_status = "Could not create export directory: " +
+				directory_error.message();
+			return;
+		}
+
+		SDLPaletteHandle palette =
+			Renderer::CreateSDLPaletteForSet(*m_menu_background_palette_set);
+		if (!palette)
+		{
+			m_menu_background_status =
+				"Could not create the combined shared-menu palette.";
+			return;
+		}
+		const BoundingBox bounds = image.texture->sprite->GetBoundingBox();
+		SDLSurfaceHandle output_surface{ SDL_CreateSurface(
+			bounds.Width(), bounds.Height(), SDL_PIXELFORMAT_INDEX8) };
+		if (!output_surface)
+		{
+			m_menu_background_status = "Could not create the PNG export surface.";
+			return;
+		}
+		SDL_SetSurfacePalette(output_surface.get(), palette.get());
+		SDL_SetSurfaceColorKey(output_surface.get(), true, 0);
+		int indexed_width = 0;
+		int indexed_height = 0;
+		const std::vector<Uint8> indexed_pixels = RenderSpriteIndexedPixels(
+			*image.texture->sprite,
+			*m_menu_background_palette_set,
+			indexed_width,
+			indexed_height);
+		if (indexed_width != output_surface->w ||
+			indexed_height != output_surface->h ||
+			indexed_pixels.size() <
+				static_cast<std::size_t>(indexed_width) * indexed_height)
+		{
+			m_menu_background_status =
+				"Could not preserve the exact shared-menu palette indices for PNG export.";
+			return;
+		}
+		for (int y = 0; y < indexed_height; ++y)
+		{
+			Uint8* destination_row = static_cast<Uint8*>(output_surface->pixels) +
+				static_cast<std::size_t>(y) * output_surface->pitch;
+			std::copy_n(
+				indexed_pixels.begin() + static_cast<std::ptrdiff_t>(
+					static_cast<std::size_t>(y) * indexed_width),
+				static_cast<std::size_t>(indexed_width),
+				destination_row);
+		}
+		const std::string export_path_utf8 = PathToUtf8(export_path);
+		if (!IMG_SavePNG(output_surface.get(), export_path_utf8.c_str()))
+		{
+			m_menu_background_status = "Could not export PNG: " + export_path_utf8;
+			return;
+		}
+		m_menu_background_status =
+			"Exported the shared background. The Options, Hi-Score and Credits categories use the same ROM image.";
+	}
+
 	void EditorSpriteNavigator::ImportMainSpriteImage(
 		const std::filesystem::path& path,
 		Uint32 sprite_rom_offset
@@ -1481,6 +1854,9 @@ namespace spintool
 			m_main_sprite_status = "The PNG could not be converted to indexed pixels.";
 			return;
 		}
+		const std::size_t modified_pixel_count = CountModifiedPixels(
+			preferred_indices, indexed_pixels
+		);
 
 		const BoundingBox bounds = target_sprite->GetBoundingBox();
 		if (bounds.Width() <= 0 || bounds.Height() <= 0)
@@ -1654,25 +2030,11 @@ namespace spintool
 		}
 
 		m_selected_sprite_rom_offset = sprite_rom_offset;
-		std::error_code absolute_path_error;
-		const std::filesystem::path absolute_saved_path =
-			std::filesystem::absolute(saved_rom_path, absolute_path_error);
-		const std::filesystem::path& displayed_path = absolute_path_error
-			? saved_rom_path
-			: absolute_saved_path;
-
-		std::ostringstream status;
-		status << "Main Sprite imported at 0x"
-			<< std::hex << std::uppercase << sprite_rom_offset
-			<< std::dec; /*<< ". ROM saved, reloaded and verified: "
-			<< PathToUtf8(displayed_path);*/
-		if (loaded_image->w != bounds.Width() || loaded_image->h != bounds.Height())
-		{
-			status << ". PNG size was " << loaded_image->w << "x" << loaded_image->h
-				<< "; sprite area is " << bounds.Width() << "x" << bounds.Height()
-				<< " (extra pixels ignored, missing pixels made transparent)";
-		}
-		m_main_sprite_status = status.str();
+		m_main_sprite_status = FormatImportStatistics(
+			modified_pixel_count,
+			0U,
+			0U
+		);
 	}
 
 
@@ -1716,6 +2078,20 @@ namespace spintool
 			if (refreshed_title.palette_set)
 			{
 				m_title_screen_palette_set = refreshed_title.palette_set;
+			}
+		}
+
+		for (MenuBackgroundFramePreview& image : m_menu_background_images)
+		{
+			if (image.texture) image.texture->texture.reset();
+		}
+		if (!m_menu_background_images.empty())
+		{
+			const rom::MenuBackgroundDecodeResult refreshed_menu =
+				rom::MenuBackgroundDecoder::Decode(m_owning_ui.GetROM());
+			if (refreshed_menu.palette_set)
+			{
+				m_menu_background_palette_set = refreshed_menu.palette_set;
 			}
 		}
 
@@ -2008,6 +2384,35 @@ namespace spintool
 				ImGui::TreePop();
 			}
 
+			ImGui::SeparatorText("Options / Hi-Score / Credits Background");
+			if (ImGui::Button("Load Shared Menu Background"))
+			{
+				LoadMenuBackgroundImages();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Clear Shared Menu Background"))
+			{
+				m_result_display_mode = ResultDisplayMode::MENU_BACKGROUND_FRAMES;
+				m_menu_background_images.clear();
+				m_menu_background_warnings.clear();
+				m_menu_background_status.clear();
+				m_menu_background_palette_set.reset();
+				m_selected_menu_background_image = -1;
+			}
+			if (!m_menu_background_status.empty())
+			{
+				ImGui::TextWrapped("%s", m_menu_background_status.c_str());
+			}
+			if (!m_menu_background_warnings.empty() &&
+				ImGui::TreeNode("Shared menu decoder notes"))
+			{
+				for (const std::string& warning : m_menu_background_warnings)
+				{
+					ImGui::BulletText("%s", warning.c_str());
+				}
+				ImGui::TreePop();
+			}
+
 			FileSelectorSettings bonus_import_settings;
 			bonus_import_settings.object_typename = "Bonus Stage PNG";
 			bonus_import_settings.target_directory = m_owning_ui.GetSpriteExportPath();
@@ -2092,6 +2497,34 @@ namespace spintool
 				m_title_import_target.reset();
 				m_close_title_import_popup = true;
 				ImportTitleScreenImage(*selected_title_png, target_index);
+			}
+
+			FileSelectorSettings menu_background_import_settings;
+			menu_background_import_settings.object_typename =
+				"Options / Hi-Score / Credits Background PNG";
+			menu_background_import_settings.target_directory =
+				m_owning_ui.GetSpriteExportPath();
+			menu_background_import_settings.file_extension_filter = { ".png" };
+			menu_background_import_settings.tiled_previews = true;
+			menu_background_import_settings.num_columns = 4;
+			menu_background_import_settings.open_popup = std::exchange(
+				m_open_menu_background_import_popup, false);
+			menu_background_import_settings.close_popup = std::exchange(
+				m_close_menu_background_import_popup, false);
+			const std::optional<std::filesystem::path> selected_menu_background_png =
+				DrawFileSelector(
+					menu_background_import_settings,
+					m_owning_ui,
+					std::nullopt);
+			if (selected_menu_background_png &&
+				m_menu_background_import_target.has_value())
+			{
+				const std::size_t target_index =
+					*m_menu_background_import_target;
+				m_menu_background_import_target.reset();
+				m_close_menu_background_import_popup = true;
+				ImportMenuBackgroundImage(
+					*selected_menu_background_png, target_index);
 			}
 
 			FileSelectorSettings main_import_settings;
@@ -2418,28 +2851,34 @@ namespace spintool
 
 			ImGui::SeparatorText("Palette");
 
-			if (m_result_display_mode == ResultDisplayMode::TITLE_SCREEN_FRAMES)
+			if (m_result_display_mode == ResultDisplayMode::TITLE_SCREEN_FRAMES ||
+				m_result_display_mode == ResultDisplayMode::MENU_BACKGROUND_FRAMES)
 			{
-				if (!m_title_screen_palette_set)
+				const bool title_mode =
+					m_result_display_mode == ResultDisplayMode::TITLE_SCREEN_FRAMES;
+				const std::shared_ptr<const rom::PaletteSet>& palette_set = title_mode
+					? m_title_screen_palette_set
+					: m_menu_background_palette_set;
+				if (!palette_set)
 				{
-					ImGui::TextDisabled("Load the title-screen frames to display their palettes.");
+					ImGui::TextDisabled(title_mode
+						? "Load the title-screen frames to display their palettes."
+						: "Load the shared menu background to display its palettes.");
 				}
 				else
 				{
-					ImGui::TextUnformatted("Title-screen palette set (4 lines)");
+					ImGui::TextUnformatted(title_mode
+						? "Title-screen palette set (4 lines)"
+						: "Options / Hi-Score / Credits palette set (4 lines)");
 					for (std::size_t line = 0U;
-						line < m_title_screen_palette_set->palette_lines.size();
-						++line)
+						line < palette_set->palette_lines.size(); ++line)
 					{
 						const std::shared_ptr<rom::Palette>& palette =
-							m_title_screen_palette_set->palette_lines[line];
+							palette_set->palette_lines[line];
 						if (!palette) continue;
 						ImGui::PushID(static_cast<int>(line));
 						ImGui::Text(
-							"Line %zu (ROM 0x%06X)",
-							line,
-							palette->offset
-						);
+							"Line %zu (ROM 0x%06X)", line, palette->offset);
 						DrawPaletteSwatchPreview(*palette);
 						ImGui::PopID();
 					}
@@ -2456,6 +2895,10 @@ namespace spintool
 					if (image.texture) image.texture->texture.reset();
 				}
 				for (TailsPlaneFramePreview& image : m_tails_plane_images)
+				{
+					if (image.texture) image.texture->texture.reset();
+				}
+				for (MenuBackgroundFramePreview& image : m_menu_background_images)
 				{
 					if (image.texture) image.texture->texture.reset();
 				}
@@ -2831,6 +3274,91 @@ namespace spintool
 					ImGui::PopID();
 				}
 			}
+			else if (m_result_display_mode == ResultDisplayMode::MENU_BACKGROUND_FRAMES)
+			{
+				ImGui::Text(
+					"Shared Menu Background: %zu",
+					m_menu_background_images.size());
+				current_width = static_cast<int>(ImGui::GetCursorPosX());
+				bool has_item_on_row = false;
+
+				std::lock_guard<std::recursive_mutex> render_lock(
+					m_owning_ui.m_render_to_texture_mutex);
+				for (std::size_t image_index = 0U;
+					image_index < m_menu_background_images.size(); ++image_index)
+				{
+					MenuBackgroundFramePreview& image =
+						m_menu_background_images[image_index];
+					std::shared_ptr<UISpriteTexture>& tex = image.texture;
+					if (!tex || !tex->sprite) continue;
+					if (!tex->texture && m_menu_background_palette_set)
+					{
+						tex->texture = tex->RenderTextureForPaletteSet(
+							*m_menu_background_palette_set);
+					}
+					if (tex->dimensions.x <= 0 || tex->dimensions.y <= 0 || !tex->texture)
+					{
+						continue;
+					}
+					if (has_item_on_row &&
+						ImGui::GetContentRegionAvail().x <
+						current_width + padding_x + (tex->dimensions.x * m_zoom))
+					{
+						ImGui::NewLine();
+						ImGui::SameLine();
+						ImGui::Dummy(ImVec2(0, 0));
+						current_width = static_cast<int>(ImGui::GetCursorPosX());
+						has_item_on_row = false;
+					}
+					if (has_item_on_row) ImGui::SameLine();
+
+					ImGui::PushID(static_cast<int>(image.frame_id));
+					tex->DrawForImGui(m_zoom);
+					current_width += static_cast<int>(
+						(tex->dimensions.x * m_zoom) + ImGui::GetStyle().ItemSpacing.x);
+					has_item_on_row = true;
+					const bool hovered = ImGui::IsItemHovered();
+					const bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+
+					if (ImGui::BeginPopupContextItem(
+						"shared_menu_background_popup",
+						ImGuiPopupFlags_MouseButtonRight))
+					{
+						if (ImGui::MenuItem("Import PNG into shared ROM background"))
+						{
+							m_menu_background_import_target = image_index;
+							m_open_menu_background_import_popup = true;
+						}
+						if (ImGui::MenuItem("Export shared image as PNG"))
+						{
+							ExportMenuBackgroundImage(image_index);
+						}
+						ImGui::EndPopup();
+					}
+					if (m_selected_menu_background_image ==
+						static_cast<int>(image_index))
+					{
+						ImGui::GetWindowDrawList()->AddRect(
+							ImGui::GetItemRectMin(), ImGui::GetItemRectMax(),
+							ImGui::GetColorU32(ImVec4{ 0, 192, 0, 255 }),
+							1.0f, 0, 2.0f);
+					}
+					if (hovered)
+					{
+						ImGui::GetWindowDrawList()->AddRect(
+							ImGui::GetItemRectMin(), ImGui::GetItemRectMax(),
+							ImGui::GetColorU32(ImVec4{ 255, 255, 255, 255 }),
+							1.0f, 0, 2.0f);
+					}
+					if (clicked)
+					{
+						m_selected_menu_background_image =
+							static_cast<int>(image_index);
+					}
+					ImGui::PopID();
+				}
+			}
+
 			else
 			{
 				ImGui::Text("Main Sprites: %zu", m_sprites_found.size());

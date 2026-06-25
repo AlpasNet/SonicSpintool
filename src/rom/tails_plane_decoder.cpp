@@ -1804,6 +1804,12 @@ namespace spintool::rom
 			result.message = error;
 			return result;
 		}
+		result.remaining_bytes = capacity >= current_stream_size
+			? capacity - current_stream_size
+			: 0U;
+		result.compression_saved_bytes = tile_art.size() > current_stream_size
+			? tile_art.size() - current_stream_size
+			: 0U;
 		if (changed_pixel_count == 0U)
 		{
 			result.success = true;
@@ -1865,6 +1871,10 @@ namespace spintool::rom
 		);
 		UpdateMegaDriveChecksum(rom);
 
+		result.remaining_bytes = capacity - compression.data.size();
+		result.compression_saved_bytes = tile_art.size() > compression.data.size()
+			? tile_art.size() - compression.data.size()
+			: 0U;
 		result.success = true;
 		result.changed = true;
 		std::ostringstream message;
