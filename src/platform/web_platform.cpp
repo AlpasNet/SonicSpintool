@@ -1,5 +1,9 @@
 #include "platform/web_platform.h"
 
+#include <filesystem>
+#include <optional>
+#include <string>
+#include <vector>
 #include <algorithm>
 #include <cctype>
 #include <map>

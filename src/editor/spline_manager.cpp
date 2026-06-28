@@ -1,4 +1,5 @@
 #include "editor/spline_manager.h"
+#include <algorithm>
 #include <iostream>
 #include <cassert>
 #include <cmath>

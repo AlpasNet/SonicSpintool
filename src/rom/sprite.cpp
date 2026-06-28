@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "rom/sprite.h"
 
 #include "rom/sprite_tile.h"

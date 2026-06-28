@@ -11,6 +11,7 @@
 #include "ui/ui_editor.h"
 #include "SDL3/SDL_image.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <string>
 #include <cstdio>

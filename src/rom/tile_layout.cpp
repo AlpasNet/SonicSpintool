@@ -4,6 +4,7 @@
 #include "rom/tile.h"
 #include "rom/tile_brush.h"
 
+#include <algorithm>
 #include <memory>
 
 namespace spintool::rom

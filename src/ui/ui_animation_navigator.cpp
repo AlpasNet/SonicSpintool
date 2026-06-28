@@ -2,6 +2,7 @@
 
 #include "ui/ui_editor.h"
 #include "types/rom_ptr.h"
+#include <algorithm>
 #include <chrono>
 
 namespace spintool

@@ -1,6 +1,7 @@
 #include "ui/ui_sprite_viewer.h"
 #include "ui/ui_palette_viewer.h"
 #include "ui/ui_editor.h"
+#include <algorithm>
 #include <memory>
 
 namespace spintool

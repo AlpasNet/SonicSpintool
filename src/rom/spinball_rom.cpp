@@ -6,6 +6,10 @@
 #include "types/sdl_handle_defs.h"
 #include "platform/web_platform.h"
 
+#include <filesystem>
+#include <iterator>
+#include <memory>
+#include <vector>
 #include <fstream>
 #include "SDL3/SDL_stdinc.h"
 #include "SDL3/SDL_surface.h"

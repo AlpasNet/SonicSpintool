@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "editor/game_obj_manager.h"
 
 #include "rom/culling_tables/game_obj_collision_culling_table.h"

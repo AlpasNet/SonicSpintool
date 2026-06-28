@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "rom/ssc_decompressor.h"
 
 namespace spintool::rom

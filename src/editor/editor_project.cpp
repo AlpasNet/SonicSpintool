@@ -3,6 +3,9 @@
 #include "ui/ui_editor.h"
 #include "platform/web_platform.h"
 #include "nlohmann/json.hpp"
+#include <filesystem>
+#include <memory>
+#include <string>
 #include <fstream>
 
 namespace spintool

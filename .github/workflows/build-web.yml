@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Emscripten SDK
         shell: bash
@@ -31,6 +31,15 @@ jobs:
         run: |
           source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
           ./web/build-web.sh
+
+      - name: Upload WebAssembly build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpinTool-Web-Build-Log
+          path: build-web.log
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Verify web package
         shell: bash

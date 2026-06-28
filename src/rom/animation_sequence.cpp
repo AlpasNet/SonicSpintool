@@ -1,6 +1,7 @@
 #include "rom/animation_sequence.h"
 #include "rom/spinball_rom.h"
 
+#include <algorithm>
 #include <memory>
 
 namespace spintool::rom

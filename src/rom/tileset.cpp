@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "rom/tileset.h"
 
 #include "rom/sprite.h"

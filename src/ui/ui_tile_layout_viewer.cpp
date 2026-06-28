@@ -5,6 +5,7 @@
 
 #include "SDL3/SDL_image.h"
 
+#include <algorithm>
 #include <cassert>
 #include <filesystem>
 #include "rom/ssc_compressor.h"
