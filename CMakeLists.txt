@@ -102,6 +102,10 @@ add_executable(spintool
         src/serialisation/editor_serialiser.cpp)
 
 target_include_directories(spintool PRIVATE
+    # Both include styles are used by the project:
+    #   <nlohmann/json.hpp>      -> external
+    #   "json_fwd.hpp"          -> external/nlohmann
+    external
     external/imgui
     external/imgui/backends
     external/imgui/misc/cpp
@@ -143,7 +147,6 @@ if(EMSCRIPTEN)
         SUFFIX ".html"
     )
 else()
-    target_include_directories(spintool PRIVATE external)
     target_link_libraries(spintool PRIVATE SDL3_image::SDL3_image)
 endif()
 
